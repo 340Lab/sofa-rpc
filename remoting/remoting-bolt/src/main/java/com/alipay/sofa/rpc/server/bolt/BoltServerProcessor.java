@@ -21,6 +21,7 @@ import com.alipay.remoting.BizContext;
 import com.alipay.remoting.InvokeContext;
 import com.alipay.remoting.rpc.protocol.AsyncUserProcessor;
 import com.alipay.remoting.rpc.protocol.UserProcessor;
+import com.alipay.sofa.common.insight.RecordContext;
 import com.alipay.sofa.rpc.codec.bolt.AbstractSerializationRegister;
 import com.alipay.sofa.rpc.common.RemotingConstants;
 import com.alipay.sofa.rpc.common.RpcConfigs;
@@ -108,6 +109,8 @@ public class BoltServerProcessor extends AsyncUserProcessor<SofaRequest> {
             // 默认全局appName
             appName = (String) RpcRuntimeContext.get(RpcRuntimeContext.KEY_APPNAME);
         }
+        String serviceName = request.getTargetServiceUniqueName();
+        String methodName = request.getMethodName();
 
         // 是否链路异步化中
         boolean isAsyncChain = false;
@@ -135,8 +138,6 @@ public class BoltServerProcessor extends AsyncUserProcessor<SofaRequest> {
             SofaResponse response = null; // 响应，用于返回
             Throwable throwable = null; // 异常，用于记录
             ProviderConfig providerConfig = null;
-            String serviceName = request.getTargetServiceUniqueName();
-
             try { // 这个try-catch 保证一定有Response
                 invoke:
                 {
@@ -164,7 +165,6 @@ public class BoltServerProcessor extends AsyncUserProcessor<SofaRequest> {
                         appName = providerConfig != null ? providerConfig.getAppName() : null;
                     }
                     // 查找方法
-                    String methodName = request.getMethodName();
                     Method serviceMethod = ReflectCache.getOverloadMethodCache(serviceName, methodName,
                         request.getMethodArgSigs());
                     if (serviceMethod == null) {
@@ -211,6 +211,16 @@ public class BoltServerProcessor extends AsyncUserProcessor<SofaRequest> {
                 LOGGER.errorWithApp(appName, e.getMessage(), e);
             }
         } finally {
+            RecordContext recordContext = bizCtx.getInvokeContext().getRecordContext();
+            recordContext.setTargetServiceUniqueName(serviceName);
+            Object traceContext = request.getRequestProp(RemotingConstants.RPC_TRACE_NAME);
+            if (traceContext instanceof Map) {
+                Map<String, String> ctxMap = (Map<String, String>) traceContext;
+                String traceId = ctxMap.get(RemotingConstants.TRACE_ID_KEY);
+                String rpcId = ctxMap.get(RemotingConstants.RPC_ID_KEY);
+                recordContext.setTraceId(traceId);
+                recordContext.setRpcId(rpcId);
+            }
             processingCount.decrementAndGet();
             if (!isAsyncChain) {
                 if (EventBus.isEnable(ServerEndHandleEvent.class)) {
